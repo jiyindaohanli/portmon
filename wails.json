@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "portmon",
+  "outputfilename": "PortMon",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "author": {
+    "name": "portmon",
+    "email": ""
+  },
+  "info": {
+    "companyName": "portmon",
+    "productName": "PortMon",
+    "productVersion": "0.1.0",
+    "copyright": "",
+    "comments": "Windows 端口占用监控"
+  }
+}

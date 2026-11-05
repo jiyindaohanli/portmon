@@ -1,0 +1,5 @@
+build/bin/
+build/*.png
+!build/appicon.png
+frontend/wailsjs/
+*.log

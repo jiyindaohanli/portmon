@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PortMon</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header class="titlebar" id="titlebar">
+  <div class="brand">
+    <img class="logo" src="logo.png" alt="">
+    <div class="brand-text">
+      <h1>PortMon</h1>
+      <p>谁占了我的端口</p>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><b id="statListen">–</b><i>监听</i></div>
+    <div class="stat"><b id="statConns">–</b><i>连接</i></div>
+    <div class="stat"><b id="statProcs">–</b><i>进程</i></div>
+  </div>
+
+  <div class="dragzone"></div>
+
+  <div class="tools">
+    <label class="search">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 L21 21"/></svg>
+      <input id="search" type="text" placeholder="端口 / 进程名 / PID" autocomplete="off" spellcheck="false">
+    </label>
+    <button class="btn ghost" id="btnPause" title="暂停监听">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="6" width="3.5" height="12" rx="1"/><rect x="13.5" y="6" width="3.5" height="12" rx="1"/></svg>
+      <span>暂停</span>
+    </button>
+    <div class="winbtns">
+      <button class="win" id="btnMin" title="最小化"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg></button>
+      <button class="win" id="btnMax" title="最大化"><svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2"/></svg></button>
+      <button class="win close" id="btnClose" title="收进托盘"><svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg></button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="card tablecard">
+    <div class="thead">
+      <span class="c-accent"></span>
+      <span class="c-port">端口</span>
+      <span class="c-addr">绑定地址</span>
+      <span class="c-proc">占用进程</span>
+      <span class="c-conns">连接</span>
+      <span class="c-act">操作</span>
+    </div>
+    <div class="tbody" id="rows"></div>
+
+    <div class="empty" id="empty" hidden>
+      <svg viewBox="0 0 120 120" aria-hidden="true">
+        <ellipse cx="60" cy="104" rx="34" ry="6" fill="#00000010"/>
+        <path d="M28 62c0-18 14-32 32-32s32 14 32 32v18a16 16 0 0 1-16 16H44a16 16 0 0 1-16-16z" fill="#FF8A5B" stroke="#2B2B2B" stroke-width="4"/>
+        <path d="M42 58h6M72 58h6" stroke="#2B2B2B" stroke-width="4" stroke-linecap="round"/>
+        <path d="M52 76c3 3 13 3 16 0" stroke="#2B2B2B" stroke-width="4" stroke-linecap="round" fill="none"/>
+      </svg>
+      <b>没有匹配的端口</b>
+      <span>换个关键词，或者清空搜索框</span>
+    </div>
+  </section>
+
+  <aside class="card drawer" id="drawer" hidden>
+    <div class="drawer-head">
+      <div class="drawer-proc">
+        <span class="avatar lg" id="dAvatar"></span>
+        <div>
+          <b id="dName">–</b>
+          <i id="dPid">–</i>
+        </div>
+      </div>
+      <button class="icon-btn" id="dClose" title="关闭">
+        <svg viewBox="0 0 24 24"><path d="M7 7l10 10M17 7L7 17"/></svg>
+      </button>
+    </div>
+
+    <div class="drawer-body" id="dBody"></div>
+
+    <div class="drawer-foot">
+      <button class="btn primary" id="dReveal">打开所在目录</button>
+      <button class="btn danger" id="dKill">结束进程</button>
+    </div>
+  </aside>
+</main>
+
+<div class="toast" id="toast" hidden></div>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="modal" id="modal">
+    <div class="modal-mascot" id="mMascot"></div>
+    <h2 id="mTitle">确认结束进程？</h2>
+    <p class="modal-desc" id="mDesc"></p>
+    <pre class="modal-cmd" id="mCmd" hidden></pre>
+    <div class="modal-warn" id="mWarn" hidden></div>
+    <label class="modal-check" id="mTreeWrap">
+      <input type="checkbox" id="mTree" checked>
+      <span>同时结束它的子进程</span>
+    </label>
+    <div class="modal-actions">
+      <button class="btn ghost" id="mCancel">先算了</button>
+      <button class="btn danger" id="mOk">确认结束</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
