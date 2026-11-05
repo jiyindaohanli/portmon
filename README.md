@@ -10,6 +10,7 @@ Windows 11 端口占用监控 + 安全结束进程。Go + Wails v2，单 exe，�
 - **WSL2 桥接**：Docker 容器 / WSL 内部服务发布到宿主机的端口也看得见（`127.0.0.1:16389 -> 6379` 这种会显示成容器名 + 镜像）
 - **盯守端口**：指定几个端口（3306/6379/315…），固定展示它们当前被谁占用；空闲的也占一行，状态一眼可见
 - 按端口 / 进程名 / PID / 绑定地址搜索
+- 头部实时显示整机 **CPU / 内存 / 磁盘** 占用率；鼠标悬停看明细（内存已用/可用，磁盘逐盘符占用与总量）
 - 手动结束进程（单个或整棵进程树），结束后**回查端口是否真的释放**
 - 系统关键进程只给看、不给杀，理由写在界面上（不是一句"无权限"）
 - 托盘常驻：关闭窗口收进托盘，托盘菜单可暂停监听 / 开关开机自启 / 退出
@@ -42,6 +43,7 @@ internal/win32/
 internal/monitor/poller.go  自适应轮询 + 变化签名
 internal/wsl/wsl.go         WSL2 桥接：ss + docker ps（低频后台探测）
 internal/store/config.go    %APPDATA%\PortMon\config.json（盯守端口）
+internal/sysinfo/sysinfo.go CPU / 内存 / 磁盘采样（GetSystemTimes / GlobalMemoryStatusEx / GetDiskFreeSpaceEx）
 frontend/dist/              静态前端（无构建步骤）：index.html / style.css / app.js
 tools/genicon/main.go       图标生成器（生成 appicon.png / icon.ico / logo.png）
 ```
