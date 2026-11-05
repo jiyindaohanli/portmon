@@ -61,5 +61,10 @@ func Save(cfg Config) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, b, 0o644)
+	// 先写临时文件再 rename：避免写到一半断电/被杀，留下半个 JSON
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
 }

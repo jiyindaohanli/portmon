@@ -174,6 +174,7 @@ function updateSegments() {
   }
   $('#segAll').textContent = S.entries.length;
   $('#segWatch').textContent = S.watchPorts.length;
+  $('#watchClear').hidden = S.watchPorts.length === 0;
 }
 
 function buildRow(e) {
@@ -591,14 +592,36 @@ async function removePort(port) {
 }
 
 async function savePorts(list) {
+  const api = App();
+  if (!api) {
+    toast('后端未就绪，改动没有保存', 'err', 5000);
+    return;
+  }
+
   S.watchPorts = list;
   renderChips();
+  render();
+
   try {
-    await App()?.SetWatchPorts(list);
+    await api.SetWatchPorts(list);
   } catch (err) {
-    toast('保存盯守端口失败：' + err, 'err');
+    toast('保存盯守端口失败：' + err, 'err', 6000);
+    return;
   }
-  if (!list.length && S.mode === 'watch') S.mode = 'all';
+
+  // 回读校验：写没写进去必须有确定答案，不允许静默失败
+  try {
+    const persisted = (await api.GetWatchPorts()) || [];
+    if (persisted.join(',') !== list.join(',')) {
+      S.watchPorts = persisted;
+      renderChips();
+      render();
+      toast('保存没生效，已回滚到磁盘上的配置', 'err', 6000);
+    }
+  } catch { /* 回读失败不影响主流程 */ }
+
+  // 清空后还留在盯守视图会看到空列表，退回全部
+  if (!S.watchPorts.length && S.mode === 'watch') S.mode = 'all';
   render();
 }
 
@@ -647,6 +670,7 @@ function wire() {
   }
 
   $('#watchAdd').addEventListener('click', () => addPorts($('#watchInput').value));
+  $('#watchClear').addEventListener('click', () => savePorts([]));
   $('#watchInput').addEventListener('keydown', (ev) => {
     if (ev.key === 'Enter') {
       ev.preventDefault();
