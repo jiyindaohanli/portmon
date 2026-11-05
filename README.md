@@ -42,6 +42,7 @@ internal/win32/
   autostart.go              HKCU Run 注册表自启
 internal/monitor/poller.go  自适应轮询 + 变化签名
 internal/wsl/wsl.go         WSL2 桥接：ss + docker ps（低频后台探测）
+internal/notify/tracker.go 盯守端口翻转检测（纯状态比对，有单测）
 internal/store/config.go    %APPDATA%\PortMon\config.json（盯守端口）
 internal/sysinfo/sysinfo.go CPU / 内存 / 磁盘采样（GetSystemTimes / GlobalMemoryStatusEx / GetDiskFreeSpaceEx）
 frontend/dist/              静态前端（无构建步骤）：index.html / style.css / app.js
@@ -63,6 +64,8 @@ tools/genicon/main.go       图标生成器（生成 appicon.png / icon.ico / lo
 **谁能杀谁不能杀。** 三档硬拦截：PID 0/4（内核本身，杀 = 蓝屏，端口 80/443 还会额外提示可能属于 http.sys 的 URL 预留）；`IsProcessCritical` 返回真的进程（PPL/关键进程，内核会直接拒绝并触发重启）；`csrss/wininit/winlogon/smss/lsass/services` 等核心组件。`svchost/dwm/explorer` 这类归为"可杀但要二次确认"，弹窗里说明后果。WSL2/Docker 的端口代理（`wslrelay/vmmemWSL`）单独标出来，因为杀宿主进程解决不了问题。
 
 **提权不做常驻服务。** 普通权限运行时遇到 `ERROR_ACCESS_DENIED`，弹出"以管理员身份重试"：用 `ShellExecuteW("runas")` 拉起带 `-kill -pid <n> -result <tmp>` 参数的自身，helper 干完活把 JSON 写进临时文件就退出，主进程轮询取回。没有 IPC、没有服务、没有安装器。
+
+**通知会在注册表留痕。** Windows 的 toast 要求应用有 AppUserModelId 和 COM 激活器，Wails 在 HKCU 下写两处（不需要管理员权限，也不会每次启动新增）：`Software\Classes\AppUserModelId\PortMon.exe` 和 `Software\Classes\CLSID\{GUID}\LocalServer32`。另外冷启动有 3 秒宽限期：WSL 桥接是异步探测的，端口表会先空后有，不宽限就会每次启动误报两条。
 
 ## 已知边界
 

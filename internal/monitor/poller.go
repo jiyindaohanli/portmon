@@ -140,9 +140,26 @@ func (p *Poller) collect() (Snapshot, string, error) {
 	}
 	udp, _ := win32.UDPTable()
 
-	// 进程表比端口表贵，2 秒刷新一次足够
+	all := make([]win32.Row, 0, len(tcp)+len(udp))
+	all = append(all, tcp...)
+	all = append(all, udp...)
+
+	// 进程表比端口表贵，平时 2 秒刷新一次；
+	// 但有新进程刚监听时它还不在表里，列表和通知的进程名会空白，所以要立刻补一次。
 	p.mu.Lock()
-	if time.Since(p.procsAt) > 2*time.Second || p.procs == nil {
+	needRefresh := p.procs == nil || time.Since(p.procsAt) > 2*time.Second
+	if !needRefresh {
+		for _, r := range all {
+			if r.State != "LISTEN" && r.State != "BOUND" {
+				continue
+			}
+			if _, ok := p.procs[r.PID]; !ok && r.PID > 0 {
+				needRefresh = true
+				break
+			}
+		}
+	}
+	if needRefresh {
 		p.procs = win32.ProcTable()
 		p.procsAt = time.Now()
 	}
@@ -157,10 +174,6 @@ func (p *Poller) collect() (Snapshot, string, error) {
 			conns[fmt.Sprintf("%d/%d", r.Port, r.PID)]++
 		}
 	}
-
-	all := make([]win32.Row, 0, len(tcp)+len(udp))
-	all = append(all, tcp...)
-	all = append(all, udp...)
 
 	entries := make([]Entry, 0, 160)
 	listen := 0

@@ -2,13 +2,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sync"
 	"time"
 
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"portmon/internal/monitor"
+	"portmon/internal/notify"
 	"portmon/internal/store"
 	"portmon/internal/sysinfo"
 	"portmon/internal/win32"
@@ -26,16 +30,40 @@ type App struct {
 	ctx     context.Context
 	poller  *monitor.Poller
 	sampler *sysinfo.Sampler
+
+	watchMu    sync.RWMutex
+	watchPorts []int
+	tracker    *notify.Tracker
+	// 冷启动宽限期：WSL 桥接是异步探测的，端口表会先空后有，
+	// 这段时间内只更新基线、不发通知，否则每次启动都会误报。
+	notifyAfter time.Time
 }
 
 func NewApp() *App {
-	return &App{poller: monitor.New(), sampler: sysinfo.NewSampler()}
+	return &App{
+		poller:  monitor.New(),
+		sampler: sysinfo.NewSampler(),
+		tracker: notify.NewTracker(),
+	}
 }
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	a.watchMu.Lock()
+	a.watchPorts = store.Load().WatchPorts
+	a.watchMu.Unlock()
+	a.notifyAfter = time.Now().Add(3 * time.Second)
+
+	// Windows toast 要先注册 AUMID 和激活器，否则弹不出来。
+	// 失败不影响主功能，端口监控照常。
+	if err := wruntime.InitializeNotifications(ctx); err != nil {
+		notifyLog("InitializeNotifications: " + err.Error())
+	}
+
 	go a.poller.Loop(func(s monitor.Snapshot) {
 		wruntime.EventsEmit(ctx, "ports:snapshot", s)
+		a.notifyWatch(s)
 	}, func(err error) {
 		wruntime.EventsEmit(ctx, "ports:error", err.Error())
 	})
@@ -47,6 +75,70 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {}
+
+// notifyWatch 盯守端口的占用状态翻转时弹系统通知。窗口收在托盘里也能收到。
+func (a *App) notifyWatch(s monitor.Snapshot) {
+	a.watchMu.RLock()
+	ports := a.watchPorts
+	a.watchMu.RUnlock()
+	if len(ports) == 0 {
+		return
+	}
+
+	owners := make(map[int]notify.Owner, len(ports))
+	for _, e := range s.Entries {
+		if _, ok := owners[e.Port]; ok {
+			continue
+		}
+		owners[e.Port] = notify.Owner{Proc: e.Proc, PID: e.PID, Source: e.Source}
+	}
+
+	for _, tr := range a.tracker.Diff(ports, owners) {
+		if time.Now().Before(a.notifyAfter) {
+			continue // 宽限期内只更新基线，不弹通知
+		}
+		title, body := watchText(tr)
+		err := wruntime.SendNotification(a.ctx, wruntime.NotificationOptions{
+			ID:    fmt.Sprintf("portmon-%d-%d", tr.Port, time.Now().UnixMilli()),
+			Title: title,
+			Body:  body,
+		})
+		if err != nil {
+			notifyLog("SendNotification: " + err.Error())
+		}
+	}
+}
+
+func watchText(tr notify.Transition) (string, string) {
+	if !tr.InUse {
+		return fmt.Sprintf("端口 %d 已释放", tr.Port), "现在没有程序在监听"
+	}
+	if tr.Owner.Source == "wsl" {
+		return fmt.Sprintf("端口 %d 被占用", tr.Port), tr.Owner.Proc + "（WSL 内部）"
+	}
+	if tr.Owner.Proc == "" {
+		return fmt.Sprintf("端口 %d 被占用", tr.Port), fmt.Sprintf("PID %d", tr.Owner.PID)
+	}
+	return fmt.Sprintf("端口 %d 被占用", tr.Port), fmt.Sprintf("%s（PID %d）", tr.Owner.Proc, tr.Owner.PID)
+}
+
+// notifyLog 通知是 Windows 上最容易静默失败的一环，出错必须留痕。
+func notifyLog(msg string) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return
+	}
+	dir = filepath.Join(dir, "PortMon")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "notify.log"), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "%s %s\n", time.Now().Format("2006-01-02 15:04:05"), msg)
+}
 
 // GetSnapshot 首次加载用，之后靠 ports:snapshot 事件推送。
 func (a *App) GetSnapshot() monitor.Snapshot {
@@ -108,7 +200,14 @@ func (a *App) GetWatchPorts() []int {
 func (a *App) SetWatchPorts(ports []int) error {
 	cfg := store.Load()
 	cfg.WatchPorts = store.Normalize(ports)
-	return store.Save(cfg)
+	if err := store.Save(cfg); err != nil {
+		return err
+	}
+
+	a.watchMu.Lock()
+	a.watchPorts = cfg.WatchPorts
+	a.watchMu.Unlock()
+	return nil
 }
 
 // RevealExe 在资源管理器里定位该进程的可执行文件。
