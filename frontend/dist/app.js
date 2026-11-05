@@ -15,6 +15,7 @@ const S = {
   toastTimer: null,
   mode: 'all',        // all | watch
   watchPorts: [],     // 盯守端口，持久化在 config.json
+  sys: null,          // 整机 CPU/内存/磁盘
 };
 
 const PALETTE = ['#FF8A5B', '#4CC9F0', '#A78BFA', '#34D399', '#FBBF24', '#F472B6', '#60A5FA', '#FB923C'];
@@ -175,6 +176,75 @@ function updateSegments() {
   $('#segAll').textContent = S.entries.length;
   $('#segWatch').textContent = S.watchPorts.length;
   $('#watchClear').hidden = S.watchPorts.length === 0;
+}
+
+/* ─────────── 整机指标（CPU / 内存 / 磁盘） ─────────── */
+
+function applySys(st) {
+  // at 为 0 表示采样器还没建立基准，先保持 “–”，不要假报 0%
+  if (!st || !st.at) return;
+  S.sys = st;
+  $('#statCpu b').textContent = Math.round(st.cpu) + '%';
+  $('#statMem b').textContent = Math.round(st.memPercent) + '%';
+  $('#statDisk b').textContent = Math.round(st.diskPercent) + '%';
+
+  // 鼠标还停在徽章上时，提示内容跟着刷新
+  if (tipEl && tipBuilder) showTip(tipEl, tipBuilder);
+}
+
+function barRow(label, pct) {
+  const v = Math.max(0, Math.min(100, pct || 0));
+  return `<div class="trow"><b>${label}</b><span class="bar"><span style="width:${v}%"></span></span><i>${Math.round(v)}%</i></div>`;
+}
+
+function tipCpu() {
+  const s = S.sys || {};
+  return `<h4>CPU 占用</h4>${barRow('', s.cpu)}<div class="trow sub">最近 1 秒平均</div>`;
+}
+
+function tipMem() {
+  const s = S.sys || {};
+  const used = (s.memTotal || 0) - (s.memAvail || 0);
+  return `<h4>物理内存</h4>${barRow('', s.memPercent)}`
+    + `<div class="trow sub">已用 ${fmtBytes(used)} / ${fmtBytes(s.memTotal)}</div>`
+    + `<div class="trow sub">可用 ${fmtBytes(s.memAvail)}</div>`;
+}
+
+function tipDisk() {
+  const s = S.sys || {};
+  const disks = s.disks || [];
+  if (!disks.length) {
+    return '<h4>磁盘</h4><div class="trow sub">没有固定磁盘</div>';
+  }
+  const rows = disks.map((d) => barRow(d.drive, d.percent)
+    + `<div class="trow sub">${fmtBytes(d.total - d.free)} / ${fmtBytes(d.total)}</div>`).join('');
+  return `<h4>磁盘合计 ${Math.round(s.diskPercent || 0)}%</h4>${rows}`;
+}
+
+let tipEl = null;
+let tipBuilder = null;
+
+function showTip(el, build) {
+  tipEl = el;
+  tipBuilder = build;
+  const tip = $('#tip');
+  tip.innerHTML = build();
+  tip.hidden = false;
+
+  const r = el.getBoundingClientRect();
+  const tw = tip.offsetWidth;
+  const th = tip.offsetHeight;
+  const x = Math.max(8, Math.min(r.left + r.width / 2 - tw / 2, window.innerWidth - tw - 8));
+  let y = r.bottom + 8;
+  if (y + th > window.innerHeight - 8) y = Math.max(8, r.top - th - 8);
+  tip.style.left = x + 'px';
+  tip.style.top = y + 'px';
+}
+
+function hideTip() {
+  tipEl = null;
+  tipBuilder = null;
+  $('#tip').hidden = true;
 }
 
 function buildRow(e) {
@@ -669,6 +739,13 @@ function wire() {
     b.addEventListener('click', () => setMode(b.dataset.mode));
   }
 
+  const tips = { statCpu: tipCpu, statMem: tipMem, statDisk: tipDisk };
+  for (const [id, build] of Object.entries(tips)) {
+    const el = $('#' + id);
+    el.addEventListener('mouseenter', () => showTip(el, build));
+    el.addEventListener('mouseleave', hideTip);
+  }
+
   $('#watchAdd').addEventListener('click', () => addPorts($('#watchInput').value));
   $('#watchClear').addEventListener('click', () => savePorts([]));
   $('#watchInput').addEventListener('keydown', (ev) => {
@@ -715,6 +792,10 @@ async function boot() {
   renderChips();
 
   try {
+    applySys(await api.GetSysStats());
+  } catch { /* 首屏拿不到就等事件 */ }
+
+  try {
     applySnapshot(await api.GetSnapshot());
   } catch (err) {
     toast('读取端口失败：' + err, 'err');
@@ -723,9 +804,11 @@ async function boot() {
   if (window.runtime && window.runtime.EventsOn) {
     window.runtime.EventsOn('ports:snapshot', applySnapshot);
     window.runtime.EventsOn('ports:error', (msg) => toast('采集异常：' + msg, 'err'));
+    window.runtime.EventsOn('sys:stats', applySys);
   } else {
     // 事件通道不可用时退化为轮询，保证界面不会停住
     setInterval(async () => applySnapshot(await api.GetSnapshot()), 800);
+    setInterval(async () => applySys(await api.GetSysStats()), 1000);
   }
 
   App()?.SetFocus(document.hasFocus());

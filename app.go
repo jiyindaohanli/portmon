@@ -10,6 +10,7 @@ import (
 
 	"portmon/internal/monitor"
 	"portmon/internal/store"
+	"portmon/internal/sysinfo"
 	"portmon/internal/win32"
 )
 
@@ -22,12 +23,13 @@ type Settings struct {
 }
 
 type App struct {
-	ctx    context.Context
-	poller *monitor.Poller
+	ctx     context.Context
+	poller  *monitor.Poller
+	sampler *sysinfo.Sampler
 }
 
 func NewApp() *App {
-	return &App{poller: monitor.New()}
+	return &App{poller: monitor.New(), sampler: sysinfo.NewSampler()}
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -37,6 +39,11 @@ func (a *App) startup(ctx context.Context) {
 	}, func(err error) {
 		wruntime.EventsEmit(ctx, "ports:error", err.Error())
 	})
+
+	// 整机指标 1 秒一次就够，和端口采集频率无关
+	go a.sampler.Run(time.Second, func(st sysinfo.Stats) {
+		wruntime.EventsEmit(ctx, "sys:stats", st)
+	})
 }
 
 func (a *App) shutdown(ctx context.Context) {}
@@ -44,6 +51,11 @@ func (a *App) shutdown(ctx context.Context) {}
 // GetSnapshot 首次加载用，之后靠 ports:snapshot 事件推送。
 func (a *App) GetSnapshot() monitor.Snapshot {
 	return a.poller.Current()
+}
+
+// GetSysStats 首屏用的整机指标，之后靠 sys:stats 事件推送。
+func (a *App) GetSysStats() sysinfo.Stats {
+	return a.sampler.Current()
 }
 
 func (a *App) GetSettings() Settings {
