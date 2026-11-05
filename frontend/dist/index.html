@@ -42,6 +42,24 @@
   </div>
 </header>
 
+<div class="toolbar">
+  <div class="segments">
+    <button class="seg active" data-mode="all">全部 <b id="segAll">–</b></button>
+    <button class="seg" data-mode="watch">盯守 <b id="segWatch">0</b></button>
+  </div>
+
+  <div class="watchbar">
+    <span class="wlabel">盯守端口</span>
+    <div class="chips" id="chips"></div>
+    <label class="addport"><input id="watchInput" placeholder="3306, 6379" inputmode="numeric" autocomplete="off"></label>
+    <button class="btn mini" id="watchAdd">添加</button>
+  </div>
+
+  <div class="dragzone"></div>
+
+  <div class="wslbadge" id="wslBadge" hidden>WSL 桥接 <b id="wslCount">0</b></div>
+</div>
+
 <main>
   <section class="card tablecard">
     <div class="thead">

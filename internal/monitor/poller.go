@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"portmon/internal/win32"
+	"portmon/internal/wsl"
 )
 
 // Entry 列表一行：一个监听中的端口（或一个 UDP 绑定）。
@@ -23,6 +24,9 @@ type Entry struct {
 	Guard    string `json:"guard"`
 	GuardMsg string `json:"guardMsg"`
 	Conns    int    `json:"conns"`
+	// Source 是 win 或 wsl。wsl 行没有宿主 PID，不能从宿主机结束。
+	Source string `json:"source"`
+	Detail string `json:"detail"`
 }
 
 // Snapshot 一次完整视图。只有内容真的变了才会推给前端。
@@ -35,6 +39,7 @@ type Snapshot struct {
 	Procs    int     `json:"procs"`
 	Paused   bool    `json:"paused"`
 	Elevated bool    `json:"elevated"`
+	WSL      int     `json:"wsl"`
 	Ms       int64   `json:"ms"`
 }
 
@@ -47,10 +52,11 @@ type Poller struct {
 	snapshot Snapshot
 	paused   bool
 	fast     bool
+	wslProbe *wsl.Prober
 }
 
 func New() *Poller {
-	return &Poller{fast: true}
+	return &Poller{fast: true, wslProbe: wsl.NewProber()}
 }
 
 // Interval 当前采样间隔。
@@ -93,6 +99,9 @@ func (p *Poller) Current() Snapshot {
 
 // Loop 持续采样，内容变化时回调。签名不变就不回调，避免前端空转。
 func (p *Poller) Loop(onChange func(Snapshot), onErr func(error)) {
+	// WSL 探测必须独立跑：单次 wsl.exe 150~400ms，塞进高频采样会直接拖垮刷新
+	go p.wslProbe.Run(p.wslRunning, 8*time.Second)
+
 	for {
 		if p.Paused() {
 			time.Sleep(p.Interval())
@@ -174,6 +183,28 @@ func (p *Poller) collect() (Snapshot, string, error) {
 			Guard:    guard,
 			GuardMsg: guardMsg,
 			Conns:    conns[fmt.Sprintf("%d/%d", r.Port, r.PID)],
+			Source:   "win",
+		})
+	}
+
+	// WSL2 的 localhost 转发不在宿主 TCP 表里，只能进虚拟机内部查
+	var wslPorts []wsl.Port
+	if p.wslRunning() {
+		wslPorts = p.wslProbe.Ports()
+	}
+	for _, wp := range wslPorts {
+		listen++
+		entries = append(entries, Entry{
+			Key:      fmt.Sprintf("wsl/%s/%d", wp.Addr, wp.Port),
+			Proto:    "WSL",
+			Addr:     wp.Addr,
+			Port:     wp.Port,
+			State:    "LISTEN",
+			Proc:     wp.Proc,
+			Guard:    win32.GuardWSL,
+			GuardMsg: "WSL 内部的监听端口，宿主机上没有对应进程，请在 WSL 内处理",
+			Source:   "wsl",
+			Detail:   wp.Detail,
 		})
 	}
 
@@ -182,7 +213,7 @@ func (p *Poller) collect() (Snapshot, string, error) {
 
 	h := sha1.New()
 	for _, e := range entries {
-		fmt.Fprintf(h, "%s|%s|%s|%d|%s\n", e.Key, e.Proc, e.Guard, e.Conns, e.State)
+		fmt.Fprintf(h, "%s|%s|%s|%d|%s|%s\n", e.Key, e.Proc, e.Guard, e.Conns, e.State, e.Detail)
 	}
 
 	seq := time.Now().UnixNano()
@@ -194,8 +225,22 @@ func (p *Poller) collect() (Snapshot, string, error) {
 		Conns:    established,
 		Procs:    len(procs),
 		Elevated: win32.IsElevated(),
+		WSL:      len(wslPorts),
 		Ms:       time.Since(start).Milliseconds(),
 	}, hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// wslRunning 只在虚拟机真的在跑时才去探测，避免无谓地反复拉起 wsl.exe。
+func (p *Poller) wslRunning() bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for _, proc := range p.procs {
+		switch proc.Name {
+		case "vmmemWSL", "wslservice.exe", "vmmemWSL.exe":
+			return true
+		}
+	}
+	return false
 }
 
 func sortEntries(e []Entry) {

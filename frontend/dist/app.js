@@ -13,6 +13,8 @@ const S = {
   query: '',
   pending: null,
   toastTimer: null,
+  mode: 'all',        // all | watch
+  watchPorts: [],     // 盯守端口，持久化在 config.json
 };
 
 const PALETTE = ['#FF8A5B', '#4CC9F0', '#A78BFA', '#34D399', '#FBBF24', '#F472B6', '#60A5FA', '#FB923C'];
@@ -32,6 +34,13 @@ function hashStr(s) {
 // 进程头像：名字哈希 → 配色 + 表情，零素材但要每个进程都有辨识度
 function avatarSVG(name) {
   if (S.avatarCache.has(name)) return S.avatarCache.get(name);
+  if (name === '__free__') {
+    const free = `<svg viewBox="0 0 32 32"><rect width="32" height="32" fill="#EFE9DE"/>
+      <path d="M10 14c1.5-1.7 3.7-1.7 5 0M17 14c1.5-1.7 3.7-1.7 5 0" stroke="#9A9284" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <circle cx="16" cy="22" r="2" fill="#9A9284"/></svg>`;
+    S.avatarCache.set(name, free);
+    return free;
+  }
   const h = hashStr(name || '?');
   const bg = PALETTE[h % PALETTE.length];
   const kind = (h >> 4) % 3;
@@ -98,6 +107,14 @@ function applySnapshot(snap) {
   $('#statConns').textContent = snap.conns ?? '–';
   $('#statProcs').textContent = snap.procs ?? '–';
 
+  // 监听数里包含了 WSL 桥接的端口，标一下以免和 netstat 对不上
+  const wsl = snap.wsl || 0;
+  $('#statListen').title = wsl ? `宿主 ${(snap.listen || 0) - wsl} + WSL ${wsl}` : '';
+  $('#wslBadge').hidden = !wsl;
+  $('#wslCount').textContent = wsl;
+
+  renderChips();
+
   const btn = $('#btnPause');
   btn.classList.toggle('on', S.paused);
   btn.querySelector('span').textContent = S.paused ? '继续' : '暂停';
@@ -116,9 +133,47 @@ function matches(e) {
 }
 
 function render() {
-  const view = S.entries.filter(matches);
+  const view = S.mode === 'watch' ? watchView() : S.entries.filter(matches);
   renderList(view);
   $('#empty').hidden = view.length > 0;
+  updateSegments();
+}
+
+// 盯守视图：只展示指定端口，空闲的也占一行——这才是“固定展示”的意义
+function watchView() {
+  const out = [];
+  for (const port of S.watchPorts) {
+    const hits = S.entries.filter((e) => e.port === port);
+    if (hits.length) out.push(...hits);
+    else out.push(freeEntry(port));
+  }
+  return S.query ? out.filter(matches) : out;
+}
+
+function freeEntry(port) {
+  return {
+    key: `free/${port}`,
+    port,
+    proto: '—',
+    addr: '—',
+    remote: '',
+    state: 'FREE',
+    pid: 0,
+    proc: '空闲',
+    guard: '',
+    guardMsg: '',
+    conns: 0,
+    source: 'free',
+    detail: '',
+  };
+}
+
+function updateSegments() {
+  for (const b of document.querySelectorAll('.seg')) {
+    b.classList.toggle('active', b.dataset.mode === S.mode);
+  }
+  $('#segAll').textContent = S.entries.length;
+  $('#segWatch').textContent = S.watchPorts.length;
 }
 
 function buildRow(e) {
@@ -134,8 +189,9 @@ function buildRow(e) {
     <span class="c-act"></span>`;
 
   const act = $('.c-act', el);
+
   const kill = document.createElement('button');
-  kill.className = 'pill';
+  kill.className = 'pill kill';
   kill.innerHTML = ICON.kill + '<span>结束</span>';
   kill.addEventListener('click', (ev) => {
     ev.stopPropagation();
@@ -144,34 +200,59 @@ function buildRow(e) {
 
   const lock = document.createElement('span');
   lock.className = 'pill locked';
-  lock.innerHTML = ICON.lock + '<span>禁杀</span>';
+  lock.innerHTML = ICON.lock + '<span class="lbl">禁杀</span>';
 
-  act.append(kill, lock);
-  el.addEventListener('click', () => openDetail(Number(el.dataset.pid)));
+  const idle = document.createElement('span');
+  idle.className = 'pill free';
+  idle.innerHTML = '<span>空闲</span>';
+
+  act.append(kill, lock, idle);
+
+  el.addEventListener('click', () => {
+    if (el.dataset.state === 'FREE') return;
+    if (el.dataset.source === 'wsl') {
+      toast(el.dataset.detail || 'WSL 内部的监听端口，请在 WSL 内处理', 'warn', 4200);
+      return;
+    }
+    openDetail(Number(el.dataset.pid));
+  });
   return el;
 }
 
 function updateRow(el, e) {
+  const isFree = e.state === 'FREE';
+  const isWSL = e.source === 'wsl';
+  const locked = LOCKED.has(e.guard);
+
   el.dataset.pid = e.pid;
   el.dataset.state = e.state;
   el.dataset.guard = e.guard || '';
+  el.dataset.source = e.source || 'win';
+  el.dataset.detail = e.detail || '';
 
   $('.c-port b', el).textContent = e.port;
   $('.c-port i', el).textContent = e.proto;
   $('.c-addr', el).textContent = e.addr;
-  $('.c-proc .avatar', el).innerHTML = avatarSVG(e.proc);
-  $('.c-proc .meta b', el).textContent = e.proc || ('PID ' + e.pid);
-  $('.c-proc .meta i', el).textContent = '#' + e.pid;
+  $('.c-proc .avatar', el).innerHTML = avatarSVG(isFree ? '__free__' : e.proc);
+  $('.c-proc .meta b', el).textContent = isFree ? '空闲' : (e.proc || ('PID ' + e.pid));
+  $('.c-proc .meta i', el).textContent = isFree
+    ? '没有程序在监听'
+    : isWSL
+      ? (e.detail || 'WSL 内部')
+      : '#' + e.pid;
 
   const conns = $('.c-conns', el);
-  conns.textContent = e.conns || '·';
-  conns.classList.toggle('zero', !e.conns);
+  conns.textContent = isFree ? '·' : (e.conns || '·');
+  conns.classList.toggle('zero', isFree || !e.conns);
 
-  const locked = LOCKED.has(e.guard);
-  el.querySelector('.pill').hidden = locked;
-  el.querySelector('.pill.locked').hidden = !locked;
-  el.title = locked ? e.guardMsg : '';
-  el.classList.toggle('active', S.selected === e.pid);
+  el.querySelector('.pill.kill').hidden = isFree || isWSL || locked;
+  const lockEl = el.querySelector('.pill.locked');
+  lockEl.hidden = isFree || !(isWSL || locked);
+  lockEl.querySelector('.lbl').textContent = isWSL ? 'WSL' : '禁杀';
+  el.querySelector('.pill.free').hidden = !isFree;
+
+  el.title = isFree ? '' : ((isWSL || locked) ? (e.guardMsg || '') : '');
+  el.classList.toggle('active', !isFree && S.selected === e.pid);
 }
 
 function renderList(view) {
@@ -453,6 +534,79 @@ function closeDrawer() {
   for (const el of S.rowEls.values()) el.classList.remove('active');
 }
 
+/* ─────────── 盯守端口 ─────────── */
+
+let chipSig = '';
+
+function renderChips() {
+  const box = $('#chips');
+  if (!box) return;
+
+  // 每 250ms 一次快照，签名不变就不重建 DOM（端口占用状态变化时才重建）
+  const sig = S.watchPorts.map((p) => p + (S.entries.some((e) => e.port === p) ? '1' : '0')).join(',');
+  if (sig === chipSig) return;
+  chipSig = sig;
+  box.innerHTML = '';
+
+  for (const port of S.watchPorts) {
+    const used = S.entries.some((e) => e.port === port);
+    const chip = document.createElement('span');
+    chip.className = 'chip ' + (used ? 'used' : 'free');
+    chip.title = used ? `${port} 正被占用` : `${port} 当前空闲`;
+
+    const label = document.createElement('span');
+    label.textContent = port;
+
+    const x = document.createElement('button');
+    x.textContent = '×';
+    x.title = `取消盯守 ${port}`;
+    x.addEventListener('click', () => removePort(port));
+
+    chip.append(label, x);
+    box.append(chip);
+  }
+}
+
+async function addPorts(text) {
+  const nums = text
+    .split(/[,，\s]+/)
+    .map((s) => parseInt(s, 10))
+    .filter((n) => n >= 1 && n <= 65535);
+
+  if (!nums.length) {
+    toast('请输入 1-65535 的端口号，多个用逗号隔开', 'warn');
+    return;
+  }
+
+  const merged = [...S.watchPorts];
+  for (const n of nums) if (!merged.includes(n)) merged.push(n);
+
+  $('#watchInput').value = '';
+  await savePorts(merged);
+  setMode('watch');
+}
+
+async function removePort(port) {
+  await savePorts(S.watchPorts.filter((p) => p !== port));
+}
+
+async function savePorts(list) {
+  S.watchPorts = list;
+  renderChips();
+  try {
+    await App()?.SetWatchPorts(list);
+  } catch (err) {
+    toast('保存盯守端口失败：' + err, 'err');
+  }
+  if (!list.length && S.mode === 'watch') S.mode = 'all';
+  render();
+}
+
+function setMode(mode) {
+  S.mode = mode;
+  render();
+}
+
 /* ─────────── 事件绑定 ─────────── */
 
 function wire() {
@@ -468,8 +622,7 @@ function wire() {
     if (snap) applySnapshot(snap);
   });
 
-  $('#btnMin').addEventListener('click', () => App()?.WindowMin());
-  $('#btnMax').addEventListener('click', () => App()?.WindowMax());
+  $('#btnMin').addEventListener('click', () => App()?.WindowMin());  $('#btnMax').addEventListener('click', () => App()?.WindowMax());
   $('#btnClose').addEventListener('click', () => App()?.WindowHide());
 
   $('#dClose').addEventListener('click', closeDrawer);
@@ -489,12 +642,25 @@ function wire() {
     if (ev.target === $('#overlay')) closeModal();
   });
 
+  for (const b of document.querySelectorAll('.seg')) {
+    b.addEventListener('click', () => setMode(b.dataset.mode));
+  }
+
+  $('#watchAdd').addEventListener('click', () => addPorts($('#watchInput').value));
+  $('#watchInput').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      addPorts($('#watchInput').value);
+    }
+  });
+
   document.addEventListener('keydown', (ev) => {
+    const typing = ['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName);
     if (ev.key === 'Escape') {
       if (!$('#overlay').hidden) closeModal();
       else if (!$('#drawer').hidden) closeDrawer();
     }
-    if (ev.key === '/' && document.activeElement !== $('#search')) {
+    if (ev.key === '/' && !typing) {
       ev.preventDefault();
       $('#search').focus();
     }
@@ -514,6 +680,15 @@ async function boot() {
     toast('后端未就绪，请重新启动 PortMon', 'err', 8000);
     return;
   }
+
+  try {
+    S.watchPorts = (await api.GetWatchPorts()) || [];
+  } catch {
+    S.watchPorts = [];
+  }
+  // 已经配置了盯守端口就直接进盯守视图，这是用户最关心的那几个
+  S.mode = S.watchPorts.length ? 'watch' : 'all';
+  renderChips();
 
   try {
     applySnapshot(await api.GetSnapshot());

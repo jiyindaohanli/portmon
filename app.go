@@ -9,6 +9,7 @@ import (
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"portmon/internal/monitor"
+	"portmon/internal/store"
 	"portmon/internal/win32"
 )
 
@@ -84,6 +85,18 @@ func (a *App) SetFocus(focused bool) {
 
 func (a *App) SetAutostart(enable bool) error {
 	return win32.SetAutostart(enable)
+}
+
+// GetWatchPorts 返回盯守端口列表，持久化在 %APPDATA%\PortMon\config.json。
+func (a *App) GetWatchPorts() []int {
+	return store.Load().WatchPorts
+}
+
+// SetWatchPorts 保存盯守端口。越界和重复在这里就丢掉，前端不用重复校验。
+func (a *App) SetWatchPorts(ports []int) error {
+	cfg := store.Load()
+	cfg.WatchPorts = store.Normalize(ports)
+	return store.Save(cfg)
 }
 
 // RevealExe 在资源管理器里定位该进程的可执行文件。

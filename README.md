@@ -7,6 +7,8 @@ Windows 11 端口占用监控 + 安全结束进程。Go + Wails v2，单 exe，�
 ## 它能做什么
 
 - 实时列出所有**正在监听**的 TCP / UDP 端口（IPv4 + IPv6），显示占用进程、命令行、所属用户、父进程、启动时间、内存
+- **WSL2 桥接**：Docker 容器 / WSL 内部服务发布到宿主机的端口也看得见（`127.0.0.1:16389 -> 6379` 这种会显示成容器名 + 镜像）
+- **盯守端口**：指定几个端口（3306/6379/315…），固定展示它们当前被谁占用；空闲的也占一行，状态一眼可见
 - 按端口 / 进程名 / PID / 绑定地址搜索
 - 手动结束进程（单个或整棵进程树），结束后**回查端口是否真的释放**
 - 系统关键进程只给看、不给杀，理由写在界面上（不是一句"无权限"）
@@ -38,6 +40,8 @@ internal/win32/
   elevate.go                runas 提权 helper（临时文件回传结果）
   autostart.go              HKCU Run 注册表自启
 internal/monitor/poller.go  自适应轮询 + 变化签名
+internal/wsl/wsl.go         WSL2 桥接：ss + docker ps（低频后台探测）
+internal/store/config.go    %APPDATA%\PortMon\config.json（盯守端口）
 frontend/dist/              静态前端（无构建步骤）：index.html / style.css / app.js
 tools/genicon/main.go       图标生成器（生成 appicon.png / icon.ico / logo.png）
 ```
@@ -48,7 +52,11 @@ tools/genicon/main.go       图标生成器（生成 appicon.png / icon.ico / lo
 
 **"实时"是 250ms 轮询，不是事件驱动。** Windows 没有端口表变更的回调 API（iphlpapi 只提供 `NotifyIpInterfaceChange` / `NotifyRouteChange2`，管的是接口和路由）。所以：窗口聚焦 250ms 采样，失焦 1500ms，托盘 1.5s。真正避免界面空转的是**变化签名**——`poller.go` 把整份视图做 SHA1，签名没变就不往前端推，签名变了才推全量（约 150 行，几十 KB）。
 
-**结束进程后必须回查。** 进程一死它的端口行就消失了，所以"查这个 PID 还有没有在监听"恒为真、等于没查。正确做法是结束**之前**记下它监听的 `地址:端口`，结束后轮询这些端口是否已经完全没有监听者。这就是 `KillResult.Freed` 的含义。
+**WSL2 的端口必须在虚拟机内部查。** WSL2 的 localhost 转发是内核级重定向，**不会**在 Windows TCP 表里留下 LISTEN 行——`netstat`、TCPView、Process Explorer 都看不到某个 Docker 容器的 `127.0.0.1:16389`，但你 `Test-NetConnection` 又能连通。所以 `internal/wsl` 用一次 `wsl.exe -e sh -c "ss -ltn; docker ps"` 同时拿端口和容器映射，合并成 `source=wsl` 的行。这些行没有宿主 PID，所以只能看不能杀。
+
+**探测成本决定它必须是低频的。** 单次 `wsl.exe` 调用 150~400ms，不能塞进 250ms 的快采样；而且没开 WSL 时根本不该去拉进程。所以它跑在独立 goroutine，8 秒一轮，且只在进程里看到 `vmmemWSL` / `wslservice` 时才真正执行。
+
+**结束进程后必须回查。** 进程一死它的端口行就消失了,所以"查这个 PID 还有没有在监听"恒为真、等于没查。正确做法是结束**之前**记下它监听的 `地址:端口`,结束后轮询这些端口是否已经完全没有监听者。这就是 `KillResult.Freed` 的含义。
 
 **谁能杀谁不能杀。** 三档硬拦截：PID 0/4（内核本身，杀 = 蓝屏，端口 80/443 还会额外提示可能属于 http.sys 的 URL 预留）；`IsProcessCritical` 返回真的进程（PPL/关键进程，内核会直接拒绝并触发重启）；`csrss/wininit/winlogon/smss/lsass/services` 等核心组件。`svchost/dwm/explorer` 这类归为"可杀但要二次确认"，弹窗里说明后果。WSL2/Docker 的端口代理（`wslrelay/vmmemWSL`）单独标出来，因为杀宿主进程解决不了问题。
 
@@ -58,8 +66,9 @@ tools/genicon/main.go       图标生成器（生成 appicon.png / icon.ico / lo
 
 - 非管理员看不到其他用户进程的命令行和工作目录（详情面板会明确说明）
 - 系统保护进程永远杀不掉，这是设计而不是缺陷
-- 看不到 WSL2 / Docker 容器内部的真实进程，只能看到宿主侧的转发进程
-- 看不到"谁正在通过这个端口通信"的对端进程（需要 WFP 驱动级能力）
+- WSL 桥接拿不到虚拟机内的进程名和 PID（无免密 sudo），只能给容器名；非 Docker 的 WSL 服务显示为“WSL 内部服务”
+- WSL 里的端口只能看、不能从宿主机结束
+- 看不到“谁正在通过这个端口通信”的对端进程（需要 WFP 驱动级能力）
 - UDP 没有连接状态，只显示绑定
 
 ## 改图标
