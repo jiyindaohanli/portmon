@@ -7,6 +7,7 @@ package wsl
 import (
 	"bytes"
 	"context"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -70,11 +71,26 @@ func (p *Prober) refresh() {
 	p.mu.Unlock()
 }
 
+// wslBinary 解析真正可用的 wsl.exe。
+//
+// 坑：WSL 从 Store 更新到 3.x 后，PATH 上的 wsl 会先命中
+// C:\Windows\System32\wsl.exe（in-box 存根），而它对新版会返回
+// “拒绝访问”——探测结果全空，WSL 端口就一个都看不到。
+// 真正可执行的是 MSIX 包释放到 C:\Program Files\WSL 下的那个。
+func wslBinary() string {
+	const installed = `C:\Program Files\WSL\wsl.exe`
+	if st, err := os.Stat(installed); err == nil && !st.IsDir() {
+		return installed
+	}
+	// 老版本（仅 in-box WSL）就回落到 PATH
+	return "wsl.exe"
+}
+
 func probe() []Port {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "wsl.exe", "-e", "sh", "-c", script)
+	cmd := exec.CommandContext(ctx, wslBinary(), "-e", "sh", "-c", script)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 
 	var buf bytes.Buffer
