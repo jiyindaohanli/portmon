@@ -54,7 +54,11 @@
 
   <div class="watchbar">
     <span class="wlabel">盯守端口</span>
-    <div class="chips" id="chips"></div>
+    <div class="chipwrap">
+      <div class="chips" id="chips"></div>
+      <div class="chiprail" id="chipRail" hidden><span class="thumb" id="chipThumb"></span></div>
+    </div>
+    <span class="chipcount" id="chipCount" hidden></span>
     <label class="addport"><input id="watchInput" placeholder="3306, 6379" inputmode="numeric" autocomplete="off"></label>
     <button class="btn mini" id="watchAdd">添加</button>
     <button class="btn mini ghost" id="watchClear" hidden>清空</button>
@@ -72,6 +76,7 @@
       <span class="c-port">端口</span>
       <span class="c-addr">绑定地址</span>
       <span class="c-proc">占用进程</span>
+      <span class="c-note">备注</span>
       <span class="c-conns">连接</span>
       <span class="c-act">操作</span>
     </div>
@@ -114,6 +119,24 @@
 
 <div class="toast" id="toast" hidden></div>
 <div class="tip" id="tip" hidden></div>
+
+<div class="notepop" id="notePop" hidden>
+  <div class="notepop-head">
+    <b>端口 <span id="npPort">–</span></b>
+    <i>备注会显示在列表和芯片上</i>
+  </div>
+  <input id="npInput" type="text" maxlength="24" placeholder="比如：MySQL、本地调试" autocomplete="off" spellcheck="false">
+  <label class="notepop-notify" id="npNotifyWrap">
+    <input type="checkbox" id="npNotify" checked>
+    <span>加入系统通知</span>
+  </label>
+  <div class="notepop-actions">
+    <button class="btn mini ghost" id="npClear">清除备注</button>
+    <button class="btn mini primary" id="npSave">保存</button>
+  </div>
+</div>
+
+<div class="ctxmenu" id="ctxMenu" hidden></div>
 
 <div class="overlay" id="overlay" hidden>
   <div class="modal" id="modal">

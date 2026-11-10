@@ -32,7 +32,7 @@ type App struct {
 	sampler *sysinfo.Sampler
 
 	watchMu    sync.RWMutex
-	watchPorts []int
+	watchPorts store.WatchList
 	tracker    *notify.Tracker
 	// 冷启动宽限期：WSL 桥接是异步探测的，端口表会先空后有，
 	// 这段时间内只更新基线、不发通知，否则每次启动都会误报。
@@ -79,10 +79,11 @@ func (a *App) shutdown(ctx context.Context) {}
 // notifyWatch 盯守端口的占用状态翻转时弹系统通知。窗口收在托盘里也能收到。
 func (a *App) notifyWatch(s monitor.Snapshot) {
 	a.watchMu.RLock()
-	ports := a.watchPorts
+	ports := a.watchPorts.NotifyPorts()
+	notes := a.watchPorts.Notes()
 	a.watchMu.RUnlock()
 	if len(ports) == 0 {
-		return
+		return // 全部关了通知
 	}
 
 	owners := make(map[int]notify.Owner, len(ports))
@@ -97,7 +98,7 @@ func (a *App) notifyWatch(s monitor.Snapshot) {
 		if time.Now().Before(a.notifyAfter) {
 			continue // 宽限期内只更新基线，不弹通知
 		}
-		title, body := watchText(tr)
+		title, body := watchText(tr, notes[tr.Port])
 		err := wruntime.SendNotification(a.ctx, wruntime.NotificationOptions{
 			ID:    fmt.Sprintf("portmon-%d-%d", tr.Port, time.Now().UnixMilli()),
 			Title: title,
@@ -109,17 +110,23 @@ func (a *App) notifyWatch(s monitor.Snapshot) {
 	}
 }
 
-func watchText(tr notify.Transition) (string, string) {
+// watchText 通知文案。有备注就带上，这样「端口 3306（MySQL）被占用」比一串数字好认。
+func watchText(tr notify.Transition, note string) (string, string) {
+	label := fmt.Sprintf("端口 %d", tr.Port)
+	if note != "" {
+		label = fmt.Sprintf("端口 %d（%s）", tr.Port, note)
+	}
+
 	if !tr.InUse {
-		return fmt.Sprintf("端口 %d 已释放", tr.Port), "现在没有程序在监听"
+		return label + " 已释放", "现在没有程序在监听"
 	}
 	if tr.Owner.Source == "wsl" {
-		return fmt.Sprintf("端口 %d 被占用", tr.Port), tr.Owner.Proc + "（WSL 内部）"
+		return label + " 被占用", tr.Owner.Proc + "（WSL 内部）"
 	}
 	if tr.Owner.Proc == "" {
-		return fmt.Sprintf("端口 %d 被占用", tr.Port), fmt.Sprintf("PID %d", tr.Owner.PID)
+		return label + " 被占用", fmt.Sprintf("PID %d", tr.Owner.PID)
 	}
-	return fmt.Sprintf("端口 %d 被占用", tr.Port), fmt.Sprintf("%s（PID %d）", tr.Owner.Proc, tr.Owner.PID)
+	return label + " 被占用", fmt.Sprintf("%s（PID %d）", tr.Owner.Proc, tr.Owner.PID)
 }
 
 // notifyLog 通知是 Windows 上最容易静默失败的一环，出错必须留痕。
@@ -191,15 +198,20 @@ func (a *App) SetAutostart(enable bool) error {
 	return win32.SetAutostart(enable)
 }
 
-// GetWatchPorts 返回盯守端口列表，持久化在 %APPDATA%\PortMon\config.json。
-func (a *App) GetWatchPorts() []int {
-	return store.Load().WatchPorts
+// GetWatchPorts 返回盯守列表（端口 + 备注 + 通知开关），持久化在 %APPDATA%\PortMon\config.json。
+// 数组顺序就是界面顺序。
+func (a *App) GetWatchPorts() store.WatchList {
+	list := store.Load().WatchPorts
+	if list == nil {
+		return store.WatchList{} // nil 会被序列化成 null，前端还得多判一次
+	}
+	return list
 }
 
-// SetWatchPorts 保存盯守端口。越界和重复在这里就丢掉，前端不用重复校验。
-func (a *App) SetWatchPorts(ports []int) error {
+// SetWatchPorts 保存盯守列表。越界、重复、超长备注在这里就处理掉，前端不用重复校验。
+func (a *App) SetWatchPorts(list store.WatchList) error {
 	cfg := store.Load()
-	cfg.WatchPorts = store.Normalize(ports)
+	cfg.WatchPorts = store.Normalize(list)
 	if err := store.Save(cfg); err != nil {
 		return err
 	}

@@ -148,6 +148,8 @@ svg { width: 100%; height: 100%; fill: none; stroke: var(--ink); stroke-width: 2
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex: none;
+  white-space: nowrap;
   height: 36px;
   padding: 0 14px;
   font: inherit;
@@ -237,11 +239,78 @@ svg { width: 100%; height: 100%; fill: none; stroke: var(--ink); stroke-width: 2
 .seg.active { background: var(--ink); color: #fff; }
 .seg.active b { background: rgba(255,255,255,.22); }
 
-.watchbar { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 盯守栏：chips 吃掉剩余宽度并横向滚动，两侧的标签和按钮永不被挤——
+   中文可以在任意字符间折行，不给 flex:none + nowrap 按钮就会竖排。 */
+.watchbar { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
 .wlabel { flex: none; font-size: 10.5px; letter-spacing: 1.3px; font-weight: 700; color: var(--ink-3); }
 
-.chips { display: flex; gap: 6px; min-width: 0; overflow-x: auto; padding: 2px 0; }
-.chips::-webkit-scrollbar { height: 0; }
+.chipwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 1px 0;
+}
+
+.chips {
+  display: flex;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 1px 2px 3px 0;
+  overscroll-behavior-x: contain;
+  /* 原生滚动条藏掉，换成下面自绘的 .chiprail：
+     Windows 开了“自动隐藏滚动条”时原生 overlay 滚动条会看不见，这条得永远在。 */
+  scrollbar-width: none;
+}
+.chips::-webkit-scrollbar { display: none; }
+
+/* 右边还有内容时给个渐隐，提示“可以继续往右滚” */
+.chips.more {
+  mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 26px), transparent);
+}
+.chips.less {
+  mask-image: linear-gradient(to left, #000 calc(100% - 26px), transparent);
+  -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 26px), transparent);
+}
+.chips.more.less {
+  mask-image: linear-gradient(to right, transparent, #000 26px, #000 calc(100% - 26px), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 26px, #000 calc(100% - 26px), transparent);
+}
+
+.chiprail {
+  position: relative;
+  flex: none;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(43,43,43,.10);
+  cursor: pointer;
+}
+.chiprail .thumb {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(43,43,43,.38);
+  cursor: grab;
+  transition: background .16s;
+}
+.chiprail .thumb:hover,
+.chiprail.dragging .thumb { background: var(--ink); }
+.chiprail.dragging .thumb { cursor: grabbing; }
+
+.chipcount {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--ink-3);
+  letter-spacing: .5px;
+}
 
 .chip {
   display: inline-flex;
@@ -257,9 +326,27 @@ svg { width: 100%; height: 100%; fill: none; stroke: var(--ink); stroke-width: 2
   border-radius: 999px;
   background: var(--surface);
   box-shadow: 0 2px 0 0 var(--ink);
+  cursor: pointer;
+  transition: transform .16s var(--spring), box-shadow .16s var(--spring);
+}
+.chip:hover { transform: translateY(-1px); box-shadow: 0 3px 0 0 var(--ink); }
+.chip .clabel { display: inline-flex; align-items: baseline; gap: 5px; max-width: 168px; overflow: hidden; }
+.chip .clabel b { font: inherit; white-space: nowrap; }
+.chip .clabel i {
+  font-family: var(--font);
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .chip.used { background: var(--primary-soft); }
 .chip.free { color: var(--ink-3); border-color: var(--ink-3); box-shadow: 0 2px 0 0 var(--ink-3); }
+/* 关掉系统通知的 chip：虚线边，和“空闲”的实线灰边分得开 */
+.chip.mute { border-style: dashed; }
+.chip.mute .clabel i { color: var(--ink-3); }
 .chip button {
   width: 17px; height: 17px;
   display: grid; place-items: center;
@@ -274,6 +361,13 @@ svg { width: 100%; height: 100%; fill: none; stroke: var(--ink); stroke-width: 2
   transition: background .16s, color .16s;
 }
 .chip button:hover { background: var(--danger); color: #fff; }
+/* 通知开关：常驻在芯片上，不藏在弹框里 */
+.chip button.bell { background: transparent; }
+.chip button.bell svg { width: 13px; height: 13px; stroke-width: 2.2; stroke: currentColor; }
+.chip button.bell:hover { background: var(--ink); color: #fff; }
+.chip button.bell:hover svg { stroke: #fff; }
+.chip.mute button.bell { color: var(--ink-3); }
+.chip.mute button.bell:hover { background: var(--ink-3); color: #fff; }
 
 .addport {
   display: flex;
@@ -298,7 +392,7 @@ svg { width: 100%; height: 100%; fill: none; stroke: var(--ink); stroke-width: 2
 }
 .addport input::placeholder { color: var(--ink-3); }
 
-.btn.mini { height: 28px; padding: 0 12px; font-size: 12px; box-shadow: 0 2px 0 0 var(--ink); }
+.btn.mini { height: 28px; padding: 0 12px; font-size: 12px; box-shadow: 0 2px 0 0 var(--ink); flex: none; }
 .btn.mini:hover { box-shadow: 0 4px 0 0 var(--ink); }
 
 .wslbadge {
@@ -348,8 +442,39 @@ main {
   padding: 0 16px 0 0;
 }
 
+/* 有备注时才多出一列（在“占用进程”后面）——一条备注都没有的时候不该白占 150px */
+body.has-notes .thead,
+body.has-notes .row { grid-template-columns: 8px 108px 176px minmax(190px, 1fr) 150px 64px 112px; }
+/* 备注格：空的时候也必须留在布局里（否则后面的列会错位），只是内容为空 */
+.c-note { display: none; }
+body.has-notes .c-note { display: flex; }
+/* 备注列只展示，不做编辑入口：改备注在顶部芯片上（单击 / 右键） */
+.c-note {
+  align-items: center;
+  justify-self: start;
+  max-width: 100%;
+  height: 24px;
+  padding: 0 9px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--ink-2);
+  background: #F5F1EA;
+  border: 2px solid #DDD3C4;
+  border-radius: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  user-select: text;
+}
+
+/* 空备注：格子必须占住轨道（不然后面的列错位），但盒子本身不显示 */
+.c-note:empty { visibility: hidden; }
+
 .thead {
   height: 42px;
+  /* 左边 8px = .row 的 margin；右边 24px = margin 8 + padding 16。
+     两边内容盒宽度必须相等，否则每条轨道都会错几像素。 */
+  padding: 0 24px 0 8px;
   background: var(--surface-2);
   border-bottom: var(--outline);
   font-size: 11px;
@@ -358,7 +483,14 @@ main {
   font-weight: 700;
 }
 
-.tbody { flex: 1; overflow-y: auto; overflow-x: hidden; padding: 6px 0; overflow-anchor: none; }
+.tbody {
+  position: relative; /* 拖动排序的落点线（.dropline）以它为基准绝对定位 */
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 6px 0;
+  overflow-anchor: none;
+}
 
 .row {
   position: relative;
@@ -455,6 +587,8 @@ main {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  flex: none;
+  white-space: nowrap;
   height: 28px;
   padding: 0 11px;
   font-size: 12px;
@@ -755,3 +889,128 @@ main {
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* ─────────── 备注编辑气泡 ─────────── */
+.notepop {
+  position: fixed;
+  z-index: 40;
+  width: 268px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 13px 13px;
+  background: var(--surface);
+  border: var(--outline);
+  border-radius: var(--r-md);
+  box-shadow: 0 6px 0 0 var(--ink);
+  animation: popIn .18s var(--spring);
+}
+@keyframes popIn {
+  from { opacity: 0; transform: scale(.94) translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.notepop-head { display: flex; align-items: baseline; gap: 7px; }
+.notepop-head b { font-size: 13px; font-weight: 700; }
+.notepop-head b span { font-family: var(--mono); font-size: 15px; }
+.notepop-head i { font-style: normal; font-size: 10px; color: var(--ink-3); }
+
+.notepop input[type="text"] {
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  background: #FFFBF5;
+  border: 2px solid #DDD3C4;
+  border-radius: 9px;
+  outline: 0;
+  user-select: text;
+}
+.notepop input[type="text"]:focus { border-color: var(--ink); background: var(--surface); }
+
+.notepop-notify {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.notepop-notify input {
+  width: 15px; height: 15px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
+.notepop-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ─────────── 右键菜单 ─────────── */
+.ctxmenu {
+  position: fixed;
+  z-index: 45;
+  min-width: 132px;
+  padding: 5px;
+  background: var(--surface);
+  border: var(--outline);
+  border-radius: var(--r-sm);
+  box-shadow: 0 5px 0 0 var(--ink);
+  animation: popIn .14s var(--spring);
+}
+.ctxmenu button {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: left;
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.ctxmenu button:hover { background: var(--surface-2); }
+.ctxmenu button.danger { color: var(--danger); }
+.ctxmenu button.danger:hover { background: var(--danger-soft); }
+.ctxmenu hr { margin: 4px 6px; border: 0; border-top: 1.5px solid #EFE7DA; }
+
+/* ─────────── 拖动排序 ─────────── */
+body.row-dragging { cursor: grabbing; }
+body.row-dragging .row { cursor: grabbing; }
+body.row-dragging .row:hover { transform: none; box-shadow: none; background: transparent; }
+body.row-dragging .row.dragging:hover { background: #FFFDF9; }
+
+.row.dragging {
+  z-index: 6;
+  transition: none;
+  background: #FFFDF9;
+  border-radius: var(--r-md);
+  box-shadow: 0 5px 0 0 rgba(43,43,43,.28), 0 0 0 2px var(--ink);
+  will-change: transform;
+}
+
+.dropline {
+  position: absolute;
+  left: 14px;
+  right: 14px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--primary);
+  box-shadow: 0 0 0 2px #FFFDF7;
+  pointer-events: none;
+  z-index: 7;
+}
+.dropline::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: -3px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--primary);
+  border: 2px solid #FFFDF7;
+}
+
