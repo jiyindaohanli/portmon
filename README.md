@@ -45,7 +45,7 @@ internal/win32/
 internal/monitor/poller.go  自适应轮询 + 变化签名
 internal/wsl/wsl.go         WSL2 桥接：ss + docker ps（低频后台探测）
 internal/notify/tracker.go 盯守端口翻转检测（纯状态比对，有单测）
-internal/store/config.go    %APPDATA%\PortMon\config.json（盯守端口 + 备注 + 通知开关，顺序即界面顺序）
+internal/store/config.go    配置读写：默认落在 exe 旁边（config.json + notify.log），目录不可写时回落到 %APPDATA%\PortMon
 internal/sysinfo/sysinfo.go CPU / 内存 / 磁盘采样（GetSystemTimes / GlobalMemoryStatusEx / GetDiskFreeSpaceEx）
 frontend/dist/              静态前端（无构建步骤）：index.html / style.css / app.js
 tools/genicon/main.go       图标生成器（生成 appicon.png / icon.ico / logo.png）
@@ -68,6 +68,12 @@ tools/genicon/main.go       图标生成器（生成 appicon.png / icon.ico / lo
 **提权不做常驻服务。** 普通权限运行时遇到 `ERROR_ACCESS_DENIED`，弹出"以管理员身份重试"：用 `ShellExecuteW("runas")` 拉起带 `-kill -pid <n> -result <tmp>` 参数的自身，helper 干完活把 JSON 写进临时文件就退出，主进程轮询取回。没有 IPC、没有服务、没有安装器。
 
 **通知会在注册表留痕。** Windows 的 toast 要求应用有 AppUserModelId 和 COM 激活器，Wails 在 HKCU 下写两处（不需要管理员权限，也不会每次启动新增）：`Software\Classes\AppUserModelId\PortMon.exe` 和 `Software\Classes\CLSID\{GUID}\LocalServer32`。另外冷启动有 3 秒宽限期：WSL 桥接是异步探测的，端口表会先空后有，不宽限就会每次启动误报两条。
+
+## 配置放哪
+
+绿色版：`config.json`（盯守列表：端口 / 备注 / 通知开关，**数组顺序就是列表顺序**）和 `notify.log`（通知失败才写）都在 **exe 所在目录**，整个目录拷走就换了台机器。
+
+解析顺序是 `PORTMON_CONFIG_DIR` → exe 所在目录 → `%APPDATA%\PortMon`：装在 `Program Files` 这类不可写目录时会自动回落，不会因为写不进去就丢配置。从旧版本升级时，如果 exe 旁边还没有配置文件、而 `%APPDATA%\PortMon\config.json` 存在，会**自动搬一次**（老文件保留不删）。写盘一律先写 `.tmp` 再 rename，半截 JSON 不会留在磁盘上。
 
 ## 已知边界
 

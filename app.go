@@ -130,12 +130,12 @@ func watchText(tr notify.Transition, note string) (string, string) {
 }
 
 // notifyLog 通知是 Windows 上最容易静默失败的一环，出错必须留痕。
+// 日志跟配置文件同一个目录，绿色版不往系统盘乱塞东西。
 func notifyLog(msg string) {
-	dir, err := os.UserConfigDir()
+	dir, err := store.Dir()
 	if err != nil {
 		return
 	}
-	dir = filepath.Join(dir, "PortMon")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return
 	}

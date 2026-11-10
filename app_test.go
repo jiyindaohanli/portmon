@@ -8,6 +8,8 @@ import (
 )
 
 func TestAppWatchPorts(t *testing.T) {
+	// 配置目录指到临时目录，别写进真 exe 旁边
+	t.Setenv("PORTMON_CONFIG_DIR", t.TempDir())
 	t.Setenv("AppData", t.TempDir())
 	a := NewApp()
 
